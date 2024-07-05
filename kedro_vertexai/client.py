@@ -68,6 +68,7 @@ class VertexAIPipelinesClient:
         image,
         image_pull_policy="IfNotPresent",
         parameters=None,
+        arguments=None
     ):
         """
         Runs the pipeline in Vertex AI Pipelines
@@ -84,6 +85,7 @@ class VertexAIPipelinesClient:
                 image,
                 output=spec_output.name,
                 image_pull_policy=image_pull_policy,
+                arguments=arguments
             )
 
             run = self.api_client.create_run_from_job_spec(
@@ -110,6 +112,7 @@ class VertexAIPipelinesClient:
         image,
         output,
         image_pull_policy="IfNotPresent",
+        arguments=None
     ):
         """
         Creates json file in given local output path
@@ -117,15 +120,20 @@ class VertexAIPipelinesClient:
         :param image:
         :param output:
         :param image_pull_policy:
+        :param arguments:
         :return:
         """
+        if arguments is None:
+            arguments = dict()
+
         token = os.getenv("MLFLOW_TRACKING_TOKEN", "")
         pipeline_func = self.generator.generate_pipeline(
-            pipeline, image, image_pull_policy, token
+            pipeline, image, image_pull_policy, token, arguments
         )
         compiler.Compiler().compile(
             pipeline_func=pipeline_func,
             package_path=output,
+            pipeline_parameters=arguments
         )
         self.log.info("Generated pipeline definition was saved to %s", str(output))
 

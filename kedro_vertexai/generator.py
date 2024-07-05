@@ -7,6 +7,8 @@ import os
 from tempfile import NamedTemporaryFile
 from typing import Dict
 
+from makefun import with_signature
+
 import kfp
 from kedro.framework.context import KedroContext
 from kfp.components.structures import (
@@ -15,7 +17,9 @@ from kfp.components.structures import (
     ContainerSpec,
     OutputPathPlaceholder,
     OutputSpec,
+    InputSpec
 )
+from kfp.dsl._pipeline_param import PipelineParam
 from kfp.v2 import dsl
 
 from kedro_vertexai.config import (
@@ -62,7 +66,7 @@ class PipelineGenerator:
         """
         return self.project_name.lower().replace(" ", "-").replace("_", "-")
 
-    def generate_pipeline(self, pipeline, image, image_pull_policy, token):
+    def generate_pipeline(self, pipeline, image, image_pull_policy, token, arguments=None):
         """
         This method return @dsl.pipeline annotated function that contains
         dynamically generated pipelines.
@@ -70,8 +74,12 @@ class PipelineGenerator:
         :param image: full docker image name
         :param image_pull_policy: docker pull policy
         :param token: mlflow authentication token
+        :param arguments: pipeline input arguments
         :return: kfp pipeline function
         """
+
+        if arguments is None:
+            arguments = dict()
 
         def set_dependencies(node_name, dependencies, kfp_ops):
             for dependency_group in dependencies:
@@ -79,17 +87,20 @@ class PipelineGenerator:
                 dependency_name = clean_name(dependency_group)
                 kfp_ops[name].after(kfp_ops[dependency_name])
 
+        params = ", ".join([f'{arg}: str' for arg in arguments.keys()])
+
         @dsl.pipeline(
             name=self.get_pipeline_name(),
             description=self.run_config.description,
         )
-        def convert_kedro_pipeline_to_kfp() -> None:
+        @with_signature(f'foo({params}) -> None')
+        def convert_kedro_pipeline_to_kfp(*args, **kwargs) -> None:
             from kedro.framework.project import pipelines
 
             node_dependencies = pipelines[pipeline].node_dependencies
             grouping = self.grouping.group(node_dependencies)
 
-            kfp_ops = self._build_kfp_ops(grouping, image, pipeline, token)
+            kfp_ops = self._build_kfp_ops(grouping, image, pipeline, token, arguments)
             for group_name, dependencies in grouping.dependencies.items():
                 set_dependencies(group_name, dependencies, kfp_ops)
 
@@ -148,6 +159,7 @@ class PipelineGenerator:
         image,
         pipeline,
         tracking_token=None,
+        pipeline_params=dict()
     ) -> Dict[str, dsl.ContainerOp]:
         """Build kfp container graph from Kedro node dependencies."""
         kfp_ops = {}
@@ -166,11 +178,14 @@ class PipelineGenerator:
 
             mlflow_inputs, mlflow_envs = generate_mlflow_inputs()
             component_params = (
-                [kfp_ops["mlflow-start-run"].output] if mlflow_enabled else []
+                [kfp_ops["mlflow-start-run"].output] if mlflow_enabled else [
+                    *[PipelineParam(x, param_type="str") for x in pipeline_params]
+                ]
             )
 
             runner_config = KedroVertexAIRunnerConfig(storage_root=self.run_config.root)
 
+            pipeline_params_str = ",".join([f'{k}={v}' for k, v in pipeline_params.items()])
             kedro_command = " ".join(
                 [
                     f"{KEDRO_CONFIG_RUN_ID}={dsl.PIPELINE_JOB_ID_PLACEHOLDER}",
@@ -181,6 +196,7 @@ class PipelineGenerator:
                     f"--pipeline {pipeline}",
                     f'--nodes "{",".join([n.name for n in nodes_group])}"',
                     f"--runner {VertexAIPipelinesRunner.runner_name()}",
+                    f'--params="{pipeline_params_str}"' if pipeline_params_str else "",
                     "--config config.yaml" if should_add_params else "",
                 ]
             )
@@ -196,7 +212,7 @@ class PipelineGenerator:
 
             spec = ComponentSpec(
                 name=name,
-                inputs=mlflow_inputs,
+                inputs=[InputSpec(x, "str") for x in pipeline_params],
                 outputs=[],
                 implementation=ContainerImplementation(
                     container=ContainerSpec(

@@ -2,6 +2,7 @@ import logging
 import os
 import webbrowser
 from pathlib import Path
+import json
 
 import click
 from click import ClickException, Context, confirm
@@ -106,6 +107,13 @@ def list_pipelines(ctx):
     "this option sets timeout after which the plugin will return non-zero exit code "
     "if the pipeline does not finish in time",
 )
+@click.option(
+    "-a",
+    "--arguments",
+    type=str,
+    default="{}",
+    help="Arguments to specify"
+)
 @click.pass_context
 def run_once(
     ctx: Context,
@@ -116,6 +124,7 @@ def run_once(
     params: list,
     wait_for_completion: bool,
     timeout_seconds: int,
+    arguments: str
 ):
     """Deploy pipeline as a single run within given experiment
     Config can be specified in kubeflow.yml as well."""
@@ -148,6 +157,7 @@ def run_once(
         image=image,
         image_pull_policy=config.image_pull_policy,
         parameters=format_params(params),
+        arguments=json.loads(arguments, parse_int=str)
     )
 
     click.echo(
@@ -202,8 +212,15 @@ def ui(ctx) -> None:
     default="pipeline.json",
     help="Pipeline JSON definition file.",
 )
+@click.option(
+    "-a",
+    "--arguments",
+    type=str,
+    default="{}",
+    help="Arguments to specify"
+)
 @click.pass_context
-def compile(ctx, image, pipeline, output) -> None:
+def compile(ctx, image, pipeline, output, arguments) -> None:
     """Translates Kedro pipeline into JSON file with VertexAI pipeline definition"""
     context_helper = ctx.obj["context_helper"]
     config = context_helper.config.run_config
@@ -213,6 +230,7 @@ def compile(ctx, image, pipeline, output) -> None:
         image_pull_policy=config.image_pull_policy,
         image=image if image else config.image,
         output=output,
+        arguments=json.loads(arguments, parse_int=str)
     )
 
 
