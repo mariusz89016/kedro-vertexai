@@ -14,8 +14,8 @@ from time import sleep
 from google.cloud.scheduler_v1.services.cloud_scheduler import (
     CloudSchedulerClient,
 )
-from kfp.v2 import compiler
-from kfp.v2.google.client import AIPlatformClient
+from kfp import compiler
+from google.cloud import aiplatform
 from tabulate import tabulate
 
 from .config import PluginConfig
@@ -32,9 +32,9 @@ class VertexAIPipelinesClient:
 
     def __init__(self, config: PluginConfig, project_name, context):
 
-        self.api_client = AIPlatformClient(
-            project_id=config.project_id, region=config.region
-        )
+        # self.api_client = AIPlatformClient(
+        #     project_id=config.project_id, region=config.region
+        # )
         self.cloud_scheduler_client = CloudSchedulerClient()
         self.location = f"projects/{config.project_id}/locations/{config.region}"
         self.run_config = config.run_config

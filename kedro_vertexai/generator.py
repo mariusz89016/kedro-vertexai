@@ -4,23 +4,14 @@ Generator for Vertex AI pipelines
 import json
 import logging
 import os
-from tempfile import NamedTemporaryFile
 from typing import Dict
-
-from makefun import with_signature
 
 import kfp
 from kedro.framework.context import KedroContext
-from kfp.components.structures import (
-    ComponentSpec,
-    ContainerImplementation,
-    ContainerSpec,
-    OutputPathPlaceholder,
-    OutputSpec,
-    InputSpec
-)
-from kfp.dsl._pipeline_param import PipelineParam
-from kfp.v2 import dsl
+from kfp import dsl
+from kfp.dsl.structures import ContainerSpec
+from kfp.dsl.placeholders import ConcatPlaceholder
+from makefun import with_signature
 
 from kedro_vertexai.config import (
     KedroVertexAIRunnerConfig,
@@ -100,12 +91,12 @@ class PipelineGenerator:
             node_dependencies = pipelines[pipeline].node_dependencies
             grouping = self.grouping.group(node_dependencies)
 
-            kfp_ops = self._build_kfp_ops(grouping, image, pipeline, token, arguments)
+            kfp_ops = self._build_kfp_ops(grouping, image, pipeline, token, kwargs)
             for group_name, dependencies in grouping.dependencies.items():
                 set_dependencies(group_name, dependencies, kfp_ops)
 
-            for operator in kfp_ops.values():
-                operator.container.set_image_pull_policy(image_pull_policy)
+            # for operator in kfp_ops.values():
+            #     operator.container.set_image_pull_policy(image_pull_policy)
 
         return convert_kedro_pipeline_to_kfp
 
@@ -116,7 +107,7 @@ class PipelineGenerator:
             for ha in host_aliases
         )
 
-    def _create_mlflow_op(self, image, should_add_params) -> dsl.ContainerOp:
+    def _create_mlflow_op(self, image, should_add_params) -> kfp.dsl.pipeline_task:
 
         mlflow_command = " ".join(
             [
@@ -131,27 +122,28 @@ class PipelineGenerator:
             ]
         ).strip()
 
-        spec = ComponentSpec(
-            name="mlflow-start-run",
-            inputs=[],
-            outputs=[OutputSpec("output", "String")],
-            implementation=ContainerImplementation(
-                container=ContainerSpec(
-                    image=image,
-                    command=["/bin/bash", "-c"],
-                    args=[
-                        mlflow_command,
-                        OutputPathPlaceholder(output_name="output"),
-                    ],
-                )
-            ),
-        )
-        with NamedTemporaryFile(
-            mode="w", prefix="kedro-vertexai-spec", suffix=".yaml"
-        ) as spec_file:
-            spec.save(spec_file.name)
-            component = kfp.components.load_component_from_file(spec_file.name)
-        return component()
+        # todo: mlflow
+        # spec = ComponentSpec(
+        #     name="mlflow-start-run",
+        #     inputs={},
+        #     outputs={"output": OutputSpec("String")},
+        #     implementation=Implementation(
+        #         container=ContainerSpec(
+        #             image=image,
+        #             command=["/bin/bash", "-c"],
+        #             args=[
+        #                 mlflow_command,
+        #                 OutputPathPlaceholder(output_name="output"),
+        #             ],
+        #         )
+        #     ),
+        # )
+        # with NamedTemporaryFile(
+        #     mode="w", prefix="kedro-vertexai-spec", suffix=".yaml"
+        # ) as spec_file:
+        #     spec.save(spec_file.name)
+        #     component = kfp.components.load_component_from_file(spec_file.name)
+        # return component()
 
     def _build_kfp_ops(
         self,
@@ -159,9 +151,11 @@ class PipelineGenerator:
         image,
         pipeline,
         tracking_token=None,
-        pipeline_params=dict()
-    ) -> Dict[str, dsl.ContainerOp]:
+        pipeline_params=None,
+    ) -> Dict[str, dsl.PipelineTask]:
         """Build kfp container graph from Kedro node dependencies."""
+        if pipeline_params is None:
+            pipeline_params = dict()
         kfp_ops = {}
 
         should_add_params = len(self.context.params) > 0
@@ -178,14 +172,13 @@ class PipelineGenerator:
 
             mlflow_inputs, mlflow_envs = generate_mlflow_inputs()
             component_params = (
-                [kfp_ops["mlflow-start-run"].output] if mlflow_enabled else [
-                    *[PipelineParam(x, param_type="str") for x in pipeline_params]
-                ]
+                # [kfp_ops["mlflow-start-run"].output] if mlflow_enabled else [
+                #     *[PipelineParam(x, param_type="str") for x in pipeline_params]
+                # ]
             )
 
             runner_config = KedroVertexAIRunnerConfig(storage_root=self.run_config.root)
 
-            pipeline_params_str = ",".join([f'{k}={v}' for k, v in pipeline_params.items()])
             kedro_command = " ".join(
                 [
                     f"{KEDRO_CONFIG_RUN_ID}={dsl.PIPELINE_JOB_ID_PLACEHOLDER}",
@@ -196,7 +189,6 @@ class PipelineGenerator:
                     f"--pipeline {pipeline}",
                     f'--nodes "{",".join([n.name for n in nodes_group])}"',
                     f"--runner {VertexAIPipelinesRunner.runner_name()}",
-                    f'--params="{pipeline_params_str}"' if pipeline_params_str else "",
                     "--config config.yaml" if should_add_params else "",
                 ]
             )
@@ -210,19 +202,26 @@ class PipelineGenerator:
                 ]
             ).strip()
 
-            spec = ComponentSpec(
-                name=name,
-                inputs=[InputSpec(x, "str") for x in pipeline_params],
-                outputs=[],
-                implementation=ContainerImplementation(
-                    container=ContainerSpec(
-                        image=image,
-                        command=["/bin/bash", "-c"],
-                        args=[node_command],  # TODO: re-enable? + output_placeholders,
-                    )
-                ),
-            )
-            kfp_ops[name] = self._create_kedro_op(name, tags, spec, component_params)
+            params = ", ".join([f'{arg}: str' for arg in pipeline_params.keys()])
+
+            @dsl.container_component
+            @with_signature(f"{name.replace('-', '_')}({params})")
+            def container_spec(*args, **kwargs):
+                dynamic_parameters = ['--params="']
+                for i,p in enumerate(pipeline_params.keys()):
+                    if i == 0:
+                        dynamic_parameters.extend([f'{p}=', kwargs[p]])
+                    else:
+                        dynamic_parameters.extend([f',{p}=', kwargs[p]])
+                dynamic_parameters.append('"')
+
+                return ContainerSpec(
+                    image=image,
+                    command=["/bin/bash", "-c"],
+                    args=[ConcatPlaceholder([node_command, " ", *dynamic_parameters])]  # TODO: re-enable? + output_placeholders,
+                )
+
+            kfp_ops[name] = self._create_kedro_op(name, tags, container_spec(**pipeline_params), [])
 
         return kfp_ops
 
@@ -245,29 +244,20 @@ class PipelineGenerator:
             else ""
         )
 
-    def _create_kedro_op(
-        self, name: str, tags: set, spec: ComponentSpec, op_function_parameters
-    ):
-        with NamedTemporaryFile(
-            mode="w", prefix="kedro-vertexai-node-spec", suffix=".yaml"
-        ) as spec_file:
-            spec.save(spec_file.name)
-            component = kfp.components.load_component_from_file(spec_file.name)
+    def _create_kedro_op(self, name: str, tags: set, spec: dsl.PipelineTask, op_function_parameters):
+        self._configure_resources(name, tags, spec)
+        return spec
 
-        operator = component(*op_function_parameters)
-        self._configure_resources(name, tags, operator)
-        return operator
-
-    def _configure_resources(self, name: str, tags: set, operator):
+    def _configure_resources(self, name: str, tags: set, spec):
         resources = self.run_config.resources_for(name, tags)
         node_selectors = self.run_config.node_selectors_for(name, tags)
         if "cpu" in resources and resources["cpu"]:
-            operator.set_cpu_limit(resources["cpu"])
-            operator.set_cpu_request(resources["cpu"])
+            spec.set_cpu_limit(resources["cpu"])
+            spec.set_cpu_request(resources["cpu"])
         if "gpu" in resources and resources["gpu"]:
-            operator.set_gpu_limit(resources["gpu"])
+            spec.set_gpu_limit(resources["gpu"])
         if "memory" in resources and resources["memory"]:
-            operator.set_memory_limit(resources["memory"])
-            operator.set_memory_request(resources["memory"])
+            spec.set_memory_limit(resources["memory"])
+            spec.set_memory_request(resources["memory"])
         for constraint, value in node_selectors.items():
-            operator.add_node_selector_constraint(constraint, value)
+            spec.add_node_selector_constraint(constraint, value)
