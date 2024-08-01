@@ -207,13 +207,13 @@ class PipelineGenerator:
             @dsl.container_component
             @with_signature(f"{name.replace('-', '_')}({params})")
             def container_spec(*args, **kwargs):
-                dynamic_parameters = ['--params="']
+                dynamic_parameters = ['--params="{']
                 for i,p in enumerate(pipeline_params.keys()):
                     if i == 0:
-                        dynamic_parameters.extend([f'{p}=', kwargs[p]])
+                        dynamic_parameters.extend([f'"{p}":"', kwargs[p]])
                     else:
-                        dynamic_parameters.extend([f',{p}=', kwargs[p]])
-                dynamic_parameters.append('"')
+                        dynamic_parameters.extend([f'","{p}":"', kwargs[p]])
+                dynamic_parameters.append('"}"')
 
                 return ContainerSpec(
                     image=image,
