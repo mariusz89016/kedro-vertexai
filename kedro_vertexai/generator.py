@@ -84,7 +84,7 @@ class PipelineGenerator:
             name=self.get_pipeline_name(),
             description=self.run_config.description,
         )
-        @with_signature(f'foo({params}) -> None')
+        @with_signature(f'foo(config: dict) -> None')
         def convert_kedro_pipeline_to_kfp(*args, **kwargs) -> None:
             from kedro.framework.project import pipelines
 
@@ -202,22 +202,19 @@ class PipelineGenerator:
                 ]
             ).strip()
 
-            params = ", ".join([f'{arg}: str' for arg in pipeline_params.keys()])
+            params = ", ".join([f'{arg}: dict' for arg in pipeline_params.keys()])
 
             @dsl.container_component
             @with_signature(f"{name.replace('-', '_')}({params})")
             def container_spec(*args, **kwargs):
                 dynamic_parameters = []
                 for i,p in enumerate(pipeline_params.keys()):
-                    if i == 0:
-                        dynamic_parameters.extend([f'\\"{p}\\":\\"', kwargs[p]])
-                    else:
-                        dynamic_parameters.extend([f'\\",\\"{p}\\":\\"', kwargs[p]])
+                    dynamic_parameters.append(kwargs[p])
 
                 return ContainerSpec(
                     image=image,
                     command=["/bin/bash", "-c"],
-                    args=[ConcatPlaceholder([node_command, " --params \"{\\\"config\\\": ", *dynamic_parameters, "}"])]  # TODO: re-enable? + output_placeholders,
+                    args=[ConcatPlaceholder([node_command, " --params '{", *dynamic_parameters, "}'"])]  # TODO: re-enable? + output_placeholders,
                 )
 
             kfp_ops[name] = self._create_kedro_op(name, tags, container_spec(**pipeline_params), [])
