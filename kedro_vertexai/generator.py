@@ -217,7 +217,7 @@ class PipelineGenerator:
                 return ContainerSpec(
                     image=image,
                     command=["/bin/bash", "-c"],
-                    args=[ConcatPlaceholder([node_command, " --params=\"{", *dynamic_parameters, "\"}"])]  # TODO: re-enable? + output_placeholders,
+                    args=[ConcatPlaceholder([node_command, " --params \"{\\\"config\\\": ", *dynamic_parameters, "}"])]  # TODO: re-enable? + output_placeholders,
                 )
 
             kfp_ops[name] = self._create_kedro_op(name, tags, container_spec(**pipeline_params), [])
