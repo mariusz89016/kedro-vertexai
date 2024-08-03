@@ -78,13 +78,13 @@ class PipelineGenerator:
                 dependency_name = clean_name(dependency_group)
                 kfp_ops[name].after(kfp_ops[dependency_name])
 
-        params = ", ".join([f'{arg}: str' for arg in arguments.keys()])
+        params = ", ".join([f'{arg}: dict' for arg in arguments.keys()])
 
         @dsl.pipeline(
             name=self.get_pipeline_name(),
             description=self.run_config.description,
         )
-        @with_signature(f'foo(config: dict) -> None')
+        @with_signature(f'foo({params}) -> None')
         def convert_kedro_pipeline_to_kfp(*args, **kwargs) -> None:
             from kedro.framework.project import pipelines
 
@@ -214,7 +214,7 @@ class PipelineGenerator:
                 return ContainerSpec(
                     image=image,
                     command=["/bin/bash", "-c"],
-                    args=[ConcatPlaceholder([node_command, " --params '{", *dynamic_parameters, "}'"])]  # TODO: re-enable? + output_placeholders,
+                    args=[ConcatPlaceholder([node_command, " --params '", *dynamic_parameters, "'"])]  # TODO: re-enable? + output_placeholders,
                 )
 
             kfp_ops[name] = self._create_kedro_op(name, tags, container_spec(**pipeline_params), [])
