@@ -210,14 +210,14 @@ class PipelineGenerator:
                 dynamic_parameters = []
                 for i,p in enumerate(pipeline_params.keys()):
                     if i == 0:
-                        dynamic_parameters.extend([f'"{p}":"', kwargs[p]])
+                        dynamic_parameters.extend([f'\\"{p}\\":\\"', kwargs[p]])
                     else:
-                        dynamic_parameters.extend([f'","{p}":"', kwargs[p]])
+                        dynamic_parameters.extend([f'\\",\\"{p}\\":\\"', kwargs[p]])
 
                 return ContainerSpec(
                     image=image,
                     command=["/bin/bash", "-c"],
-                    args=[ConcatPlaceholder([node_command, " --params='{", *dynamic_parameters, "\"}"])]  # TODO: re-enable? + output_placeholders,
+                    args=[ConcatPlaceholder([node_command, " --params=\"{", *dynamic_parameters, "\"}"])]  # TODO: re-enable? + output_placeholders,
                 )
 
             kfp_ops[name] = self._create_kedro_op(name, tags, container_spec(**pipeline_params), [])
