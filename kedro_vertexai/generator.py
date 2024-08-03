@@ -210,10 +210,10 @@ class PipelineGenerator:
                 dynamic_parameters = ['--params="{']
                 for i,p in enumerate(pipeline_params.keys()):
                     if i == 0:
-                        dynamic_parameters.extend([f'"{p}":"', kwargs[p]])
+                        dynamic_parameters.extend([f'\"{p}\":\"', kwargs[p].replace('"','\\"')])
                     else:
-                        dynamic_parameters.extend([f'","{p}":"', kwargs[p]])
-                dynamic_parameters.append('"}"')
+                        dynamic_parameters.extend([f'\","{p}\":\"', kwargs[p].replace('"','\\"')])
+                dynamic_parameters.append('\"}"')
 
                 return ContainerSpec(
                     image=image,
